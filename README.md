@@ -152,6 +152,7 @@ No terminal, dentro da pasta `gymsystem\backend`:
    python app.py
    ```
    Abra **<http://localhost:5000>**: o próprio servidor abre o app (front-end).
+   Daqui em diante, basta dar dois cliques no **`iniciar.bat`** (veja a seção 2).
 
 ### Logins de teste
 
@@ -166,6 +167,17 @@ As senhas acima são **só para demonstração**. No banco fica apenas o *hash* 
 ---
 
 ## 2. Uso do dia a dia
+
+**Jeito rápido:** dê dois cliques no **`iniciar.bat`**, na raiz do projeto. Ele:
+- entra em `backend/` e usa o Python do `.venv`, sem precisar ativar nada;
+- sobe o servidor;
+- abre o navegador em <http://localhost:5000> depois de alguns segundos.
+
+Para parar, use **Ctrl+C** na janela preta (ou feche a janela). Se faltar o `.venv` ou o `.env`,
+o script avisa e indica a parte do README a seguir. Se o servidor parar com erro (ex.: MySQL
+desligado), a janela fica aberta mostrando a mensagem.
+
+**Pelo terminal** (mesmo resultado, sem abrir o navegador):
 
 ```powershell
 cd gymsystem\backend
@@ -198,7 +210,9 @@ python -m unittest -v
 
 ```
 gymsystem/
+├── .gitattributes          ← garante quebra de linha do Windows (CRLF) nos .bat
 ├── .gitignore
+├── iniciar.bat             ← dois cliques: sobe o servidor e abre o navegador
 ├── README.md
 ├── backend/
 │   ├── app.py              ← inicia o servidor, junta as rotas, liga o banco, serve o front
@@ -374,7 +388,7 @@ Ficam em `gamificacao.py`:
    | D+6 / D+7 | 0/5 | recomeça em 1 dia | não |
    | D+8 em diante | desafio encerrado | recomeça em 1 dia | não |
 
-2. Suba o servidor (`python app.py`) e abra <http://localhost:5000>.
+2. Dê dois cliques no **`iniciar.bat`**: ele sobe o servidor e abre <http://localhost:5000>.
 3. Logins: Lucas (`lucas.oliveira@email.com` / `senha1234567`, já vem preenchido na tela) e admin
    (botão **"Acesso da academia"**).
 
