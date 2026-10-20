@@ -88,7 +88,8 @@ Entre no MySQL como administrador:
 mysql -u root -p
 ```
 Digite a senha temporária do passo 5 (no XAMPP, apenas Enter). Depois cole os comandos abaixo,
-trocando `uma_senha_forte` por uma senha sua. No XAMPP, pule a primeira linha.
+trocando `uma_senha_forte` (senha do `root`) e `troque_pela_sua_senha` (senha do usuário `gym`)
+por senhas suas. No XAMPP, pule a primeira linha.
 ```sql
 ALTER USER 'root'@'localhost' IDENTIFIED BY 'uma_senha_forte';
 
@@ -103,6 +104,9 @@ EXIT;
 - `gymsystem` é o banco do app e da apresentação.
 - `gymsystem_test` é usado pelos testes automáticos, que **apagam e recriam** esse banco a cada execução.
 - O usuário `gym` só tem acesso a esses dois bancos. O app não usa o `root`.
+- **Importante:** a senha que você colocou no `CREATE USER` (no lugar de `troque_pela_sua_senha`)
+  tem que ser **exatamente a mesma** do `DB_PASSWORD` no seu `.env` (passo 1.4). Se forem
+  diferentes, o seed e o servidor dão erro de acesso negado (`Access denied for user 'gym'`).
 
 ### 1.3 Instalar o Python 3.12
 
@@ -135,7 +139,8 @@ No terminal, dentro da pasta `gymsystem\backend`:
    ```powershell
    copy .env.example .env
    ```
-   Abra o `.env` e coloque em `DB_PASSWORD` a senha do usuário `gym`. O `.env` tem senha, por isso
+   Abra o `.env` e coloque em `DB_PASSWORD` a **mesma senha** que você usou no `CREATE USER` do
+   usuário `gym` (passo 1.2). O `.env` tem senha, por isso
    **não vai para o Git** (está no `.gitignore`). Cada pessoa do grupo tem o seu.
 5. Criar as tabelas e os dados iniciais:
    ```powershell
