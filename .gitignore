@@ -1,0 +1,7 @@
+# Credenciais do banco (cada um tem o seu; o modelo é o backend/.env.example)
+.env
+
+# Python
+__pycache__/
+*.pyc
+.venv/
