@@ -81,6 +81,7 @@ erDiagram
         varchar chave PK
         varchar rotulo
         boolean padrao
+        tinyint ordem
     }
     configuracoes_usuario {
         int usuario_id PK, FK

@@ -74,9 +74,9 @@ TREINOS = [
 
 CATEGORIAS = [("Evoluídos", 1), ("Moderados", 2), ("Iniciantes", 3)]
 
-OPCOES_CONFIG = [("notificacoes_treino", "Notificações de treino", True),
-                 ("sons_app", "Sons do app", True),
-                 ("lembretes_agua", "Lembretes de água", False)]
+OPCOES_CONFIG = [("notificacoes_treino", "Notificações de treino", True, 1),
+                 ("sons_app", "Sons do app", True, 2),
+                 ("lembretes_agua", "Lembretes de água", False, 3)]
 
 PLANOS = [(1, "Mensal", 99.00, 1), (2, "Trimestral", 249.00, 3),
           (3, "Semestral", 449.00, 6), (4, "Anual", 799.00, 12)]
@@ -89,7 +89,7 @@ PLANOS = [(1, "Mensal", 99.00, 1), (2, "Trimestral", 249.00, 3),
 #  plano, valor_mensal, vencimento(dias a partir de hoje), ativo
 _ = None
 ALUNOS = [
-    (1, "Lucas Oliveira", "123.456.789-00", date(2026, 1, 10), "Evoluídos", 12, 2450, 12, 18, 1, 57, _, 12, "Trimestral", 99.00, 78, True),
+    (1, "Lucas Oliveira", "123.456.789-00", date(2026, 1, 10), "Evoluídos", 12, 2450, 3, 18, 1, 57, _, 12, "Trimestral", 99.00, 78, True),
     (2, "Mariana Costa", "234.567.890-11", date(2025, 11, 20), "Evoluídos", 15, 2710, 8, 14, 1, 160, "💪", 16, "Anual", 79.00, 56, True),
     (3, "Gustavo Santos", "345.678.901-22", date(2025, 8, 3), "Evoluídos", 18, 2950, 21, 25, 2, 240, "🏋️", 20, "Semestral", 74.83, 131, True),
     (4, "Carlos Oliveira", "456.789.012-33", date(2026, 2, 28), "Iniciantes", 5, 120, 0, 6, 32, 20, _, 0, "Mensal", 99.00, -15, False),
@@ -113,6 +113,10 @@ ALUNOS = [
     (22, "Bruno Medeiros", _, _, "Iniciantes", 2, 300, 1, 2, 1, 5, _, 3, "Mensal", 99.00, 2, True),
     (23, "Jessica Souza", _, _, "Iniciantes", 1, 150, 1, 1, 1, 3, _, 3, "Trimestral", 83.00, 5, True),
 ]
+
+# Dias (atrás) em que o Lucas treinou: 12 treinos em 28 dias = "3x/sem" no painel.
+# Nenhum treino entre 4 e 6 dias atrás: a janela "últimos 7 dias" do desafio só pega os dias 1, 2 e 3.
+DIAS_TREINO_LUCAS = [1, 2, 3, 7, 9, 11, 13, 16, 19, 22, 25, 27]
 
 # Mensalidades que ficaram sem pagar: (usuario_id, meses atrás). 0 = mês atual.
 NAO_PAGOS = {(21, 0), (8, 0), (17, 0), (17, 1)}
@@ -157,7 +161,8 @@ def criar_tabelas(cur):
 def inserir_dados(cur):
     # --- catálogos
     cur.executemany("INSERT INTO categorias_ranking (nome, ordem) VALUES (%s, %s)", CATEGORIAS)
-    cur.executemany("INSERT INTO opcoes_configuracao (chave, rotulo, padrao) VALUES (%s, %s, %s)", OPCOES_CONFIG)
+    cur.executemany("INSERT INTO opcoes_configuracao (chave, rotulo, padrao, ordem) VALUES (%s, %s, %s, %s)",
+                    OPCOES_CONFIG)
     cur.executemany("INSERT INTO planos (id, nome, preco, duracao_meses) VALUES (%s, %s, %s, %s)", PLANOS)
 
     exercicio_id = {}
@@ -230,9 +235,11 @@ def inserir_dados(cur):
                         (matricula_id, ref, valor, venc_pag, venc_pag - timedelta(days=1) if pago else None))
 
         # Histórico: n28 treinos espalhados nos últimos 28 dias, o mais recente = ultimo_treino.
-        # O Lucas treinou todos os últimos 12 dias (bate com a sequência de 12).
+        # Lucas: treinou nos últimos 3 dias (sequência de 3) e não treinou há 4 dias (quebra a sequência).
+        # Assim ele tem 3 treinos nos últimos 7 dias: o desafio da semana começa em 3/5 e a barra
+        # sobe a cada treino concluído na apresentação (3 -> 4 -> 5).
         if uid == 1:
-            dias_atras = list(range(1, n28 + 1))
+            dias_atras = DIAS_TREINO_LUCAS
         elif n28:
             passo = (28 - ult) / max(n28 - 1, 1)
             dias_atras = sorted({ult + round(i * passo) for i in range(n28)})

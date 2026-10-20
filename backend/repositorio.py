@@ -27,6 +27,11 @@ from db import conexao
 
 MESES = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"]
 
+# Subconsulta usada no ranking e no painel: o id da matrícula ATUAL (a mais recente) do aluno "u".
+# É um texto fixo, sem nenhum valor vindo de fora, por isso pode ser emendado em outras consultas.
+SQL_MATRICULA_ATUAL = ("SELECT m2.id FROM matriculas m2 WHERE m2.usuario_id = u.id "
+                       "ORDER BY m2.data_inicio DESC, m2.id DESC LIMIT 1")
+
 
 # =========================================================== AUXILIARES
 def _todos(sql, params=None):
@@ -126,7 +131,7 @@ def buscar_perfil(usuario_id):
     # Configurações: todas as opções existentes, com o valor do aluno ou, se ele nunca mudou, o padrão.
     config = _todos("SELECT o.chave, COALESCE(c.valor, o.padrao) AS valor FROM opcoes_configuracao o "
                     "LEFT JOIN configuracoes_usuario c ON c.chave = o.chave AND c.usuario_id = %s "
-                    "ORDER BY o.chave", (usuario_id,))
+                    "ORDER BY o.ordem", (usuario_id,))
     return {"nivel": p["nivel"], "xp": p["xp"], "sequencia": p["sequencia"],
             "melhor_sequencia": p["melhor_sequencia"], "ultimo_treino": _iso(p["ultimo_treino"]),
             "treinos_feitos": p["treinos_feitos"], "categoria_ranking": p["categoria_ranking"],
@@ -258,10 +263,13 @@ def listar_ranking(categoria):
     """-> [{usuario_id|None, nome, xp, emoji}] ordenado por XP (maior primeiro), ou None se a categoria não existe"""
     if not _um("SELECT nome FROM categorias_ranking WHERE nome = %s", (categoria,)):
         return None
+    # Só entram alunos cuja matrícula ATUAL está ativa (aluno desativado some do ranking).
     # Ordem: nível maior primeiro e, no mesmo nível, mais XP (o XP zera a cada nível,
     # então ordenar só pelo XP colocaria um nível 18 com 100 XP atrás de um nível 2 com 900).
     return _todos("SELECT p.usuario_id, u.nome, p.xp, p.emoji FROM perfis p "
-                  "JOIN usuarios u ON u.id = p.usuario_id WHERE p.categoria_ranking = %s "
+                  "JOIN usuarios u ON u.id = p.usuario_id "
+                  "JOIN matriculas m ON m.id = (" + SQL_MATRICULA_ATUAL + ") AND m.ativo = TRUE "
+                  "WHERE p.categoria_ranking = %s "
                   "ORDER BY p.nivel DESC, p.xp DESC, u.nome", (categoria,))
 
 
@@ -357,11 +365,7 @@ def listar_desafios_academia():
 
 
 # =========================================================== ADMINISTRAÇÃO
-# Membro = usuário com papel 'aluno' + sua matrícula ATUAL (a mais recente).
-# Este pedaço de SQL aparece em várias consultas: escolhe o id da matrícula atual do aluno u.
-SQL_MATRICULA_ATUAL = ("SELECT m2.id FROM matriculas m2 WHERE m2.usuario_id = u.id "
-                       "ORDER BY m2.data_inicio DESC, m2.id DESC LIMIT 1")
-
+# Membro = usuário com papel 'aluno' + sua matrícula ATUAL (SQL_MATRICULA_ATUAL, no topo do arquivo).
 SQL_MEMBROS = (
     "SELECT u.id, u.nome, u.cpf, u.criado_em, "
     "  COALESCE(p.nivel, 1) AS nivel, COALESCE(p.sequencia, 0) AS sequencia, p.ultimo_treino, "

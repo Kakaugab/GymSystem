@@ -110,6 +110,7 @@ CREATE TABLE opcoes_configuracao (
     chave   VARCHAR(40)  NOT NULL,
     rotulo  VARCHAR(100) NOT NULL,
     padrao  BOOLEAN      NOT NULL,
+    ordem   TINYINT      NOT NULL,                  -- ordem de exibição na tela de perfil
     PRIMARY KEY (chave)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
 

@@ -1,15 +1,39 @@
 """
 Testes automáticos da API.  Rodar (dentro da pasta backend):
     python -m unittest -v
-"""
-import unittest
 
-import app as modulo_app
+Os testes rodam SEMPRE no banco de TESTE (DB_NAME_TESTE do .env, padrão "gymsystem_test"),
+nunca no banco principal. No início de cada execução o banco de teste é APAGADO e recriado
+pelo seed, então os testes sempre começam dos mesmos dados.
+"""
+import os
+import unittest
+from pathlib import Path
+
+from dotenv import dotenv_values
+
+# --- Escolhe o banco de teste ANTES de importar o app (a conexão lê DB_NAME do ambiente).
+_ENV = dotenv_values(Path(__file__).resolve().parent / ".env")
+BANCO_TESTE = os.environ.get("DB_NAME_TESTE") or _ENV.get("DB_NAME_TESTE") or "gymsystem_test"
+if not BANCO_TESTE.endswith("_test"):
+    # Trava de segurança: o seed apaga tudo. O nome precisa deixar claro que é banco de teste.
+    raise RuntimeError(f"Banco de teste '{BANCO_TESTE}' recusado: o nome precisa terminar em '_test'.")
+os.environ["DB_NAME"] = BANCO_TESTE
+
+import app as modulo_app  # noqa: E402
+import repositorio as repo  # noqa: E402
+from db import seed  # noqa: E402
+
+
+def setUpModule():
+    """Roda uma vez, antes de todos os testes: recria o banco de teste do zero."""
+    seed.popular(BANCO_TESTE)
 
 
 class TesteAPI(unittest.TestCase):
     def setUp(self):
-        self.c = modulo_app.criar_app().test_client()
+        self.app = modulo_app.criar_app()
+        self.c = self.app.test_client()
 
     def entrar(self, email="lucas.oliveira@email.com", senha="senha1234567"):
         r = self.c.post("/api/login", json={"email": email, "senha": senha})
@@ -82,7 +106,8 @@ class TesteAPI(unittest.TestCase):
     # ---------------- admin
     def test_admin(self):
         h = self.entrar("admin@gymsystem.com", "admin123")
-        self.assertEqual(self.c.get("/api/admin/painel", headers=h).json["total_membros"], 234)
+        # Contado do banco: todos os alunos com matrícula criados pelo seed.
+        self.assertEqual(self.c.get("/api/admin/painel", headers=h).json["total_membros"], len(seed.ALUNOS))
         m = self.c.get("/api/admin/membros?status=inativos", headers=h).json["membros"]
         self.assertTrue(all(not x["ativo"] for x in m))
         r = self.c.patch("/api/admin/membros/4", headers=h, json={"ativo": True})
@@ -91,6 +116,53 @@ class TesteAPI(unittest.TestCase):
         self.assertEqual(self.c.get("/api/admin/membros/999", headers=h).status_code, 404)
         self.assertEqual(len(self.c.get("/api/admin/planos", headers=h).json["planos"]), 4)
         self.assertIn("recebimentos", self.c.get("/api/admin/financeiro", headers=h).json)
+
+    # ---------------- banco de dados (novos)
+    def test_concluir_treino_atomico(self):
+        """Se um passo do 'concluir treino' falha, NADA do que foi gravado antes fica no banco."""
+        h = self.entrar()
+        antes = (self.c.get("/api/aluno/resumo", headers=h).json, self.c.get("/api/aluno/historico", headers=h).json,
+                 self.c.get("/api/duelos", headers=h).json)
+        original = repo.somar_xp_duelo
+
+        def falha(*_):  # último passo do concluir_treino: recordes, perfil e histórico já foram gravados
+            raise RuntimeError("falha simulada")
+
+        repo.somar_xp_duelo = falha
+        self.app.logger.disabled = True  # o erro é proposital: não sujar a saída dos testes
+        try:
+            r = self.c.post("/api/treinos/concluir", headers=h,
+                            json={"treino": "C", "segundos": 3000, "cargas": [100, 150, 45, 24, 8]})
+        finally:
+            repo.somar_xp_duelo = original
+        self.assertEqual(r.status_code, 500)
+        depois = (self.c.get("/api/aluno/resumo", headers=h).json, self.c.get("/api/aluno/historico", headers=h).json,
+                  self.c.get("/api/duelos", headers=h).json)
+        self.assertEqual(antes, depois)
+
+    def test_ranking_so_matricula_ativa(self):
+        """Aluno com matrícula inativa (Carlos, id 4) não aparece no ranking; reativado, aparece."""
+        h, adm = self.entrar(), self.entrar("admin@gymsystem.com", "admin123")
+
+        def nomes():
+            return [x["nome"] for x in self.c.get("/api/ranking?categoria=Iniciantes", headers=h).json]
+
+        self.assertNotIn("Carlos Oliveira", nomes())
+        self.c.patch("/api/admin/membros/4", headers=adm, json={"ativo": True})
+        try:
+            self.assertIn("Carlos Oliveira", nomes())
+        finally:
+            self.c.patch("/api/admin/membros/4", headers=adm, json={"ativo": False})
+
+    def test_dados_persistem_em_novo_app(self):
+        """Um treino concluído continua lá numa instância NOVA do app (os dados estão no banco, não na memória)."""
+        h = self.entrar()
+        self.assertEqual(self.c.post("/api/treinos/concluir", headers=h,
+                                     json={"treino": "B", "segundos": 3000}).status_code, 201)
+        novo = modulo_app.criar_app().test_client()
+        r = novo.post("/api/login", json={"email": "lucas.oliveira@email.com", "senha": "senha1234567"})
+        hist = novo.get("/api/aluno/historico", headers={"Authorization": "Bearer " + r.json["token"]}).json
+        self.assertEqual((hist["treinos"][0]["treino"], hist["treinos"][0]["quando"]), ("B", "Hoje"))
 
 
 if __name__ == "__main__":
