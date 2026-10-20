@@ -6,17 +6,26 @@ Como funciona, passo a passo, em cada requisição HTTP:
   2. obter() abre a conexão e guarda em flask.g (um "armário" que só existe durante
      esta requisição). As próximas chamadas na mesma requisição reutilizam a mesma conexão.
   3. A conexão NÃO usa autocommit: tudo o que for gravado fica numa transação aberta.
-  4. Quando a requisição termina, o Flask chama fechar() (registrado por registrar(app)):
-       - terminou sem exceção  -> COMMIT   (grava tudo de uma vez)
-       - houve exceção         -> ROLLBACK (desfaz tudo, como se nada tivesse acontecido)
+  4. Quando a resposta fica pronta, o Flask chama marcar_falha() (after_request): se o status
+     é de erro (400 ou mais), anota g._falhou = True.
+  5. Quando a requisição termina, o Flask chama fechar() (teardown_appcontext), que decide:
+       - houve exceção                      -> ROLLBACK (desfaz tudo)
+       - resposta de erro (status >= 400)   -> ROLLBACK (desfaz tudo)
+       - resposta de sucesso (2xx/3xx)      -> COMMIT   (grava tudo de uma vez)
      e a conexão é fechada.
 
 Por que isso importa: "concluir treino" chama várias funções do repositório (recordes, perfil,
 histórico, duelo). Se a última falhar, o ROLLBACK desfaz as anteriores, e o aluno não fica com
 XP somado sem o treino no histórico. Isso é a propriedade de ATOMICIDADE (o "A" do ACID).
 
-Detalhe: uma rota que devolve erro 4xx SEM exceção (ex.: return erro("...", 400)) termina
-"normalmente" e faz COMMIT. Por isso as rotas validam os dados ANTES de gravar qualquer coisa.
+Por que também desfazer nos erros 4xx? Uma rota pode gravar algo e DEPOIS descobrir que o pedido
+era inválido (return erro("...", 400)). Sem exceção, isso seria gravado pela metade. Com a regra
+"resposta de erro = ROLLBACK", o banco só muda quando a API responde sucesso, mesmo que uma rota
+nova esqueça de validar antes de gravar.
+
+Por que as duas funções? O after_request enxerga a resposta (o status), mas NÃO roda quando
+acontece uma exceção não tratada. O teardown roda SEMPRE e recebe a exceção, mas não vê a
+resposta. Juntas, cobrem todos os casos.
 
 Por que não um pool de conexões? Abrir uma conexão local custa poucos milissegundos, e para
 um trabalho de faculdade a simplicidade vale mais. Se um dia precisar, basta trocar conectar()
@@ -64,13 +73,21 @@ def obter():
     return g._conexao
 
 
+def marcar_falha(resposta):
+    """after_request: anota em g se a resposta é de erro (status >= 400)."""
+    if resposta.status_code >= 400:
+        g._falhou = True
+    return resposta  # o after_request precisa devolver a resposta (sem alterar nada)
+
+
 def fechar(excecao=None):
     """Chamado pelo Flask ao fim de cada requisição: COMMIT ou ROLLBACK e fecha a conexão."""
     con = g.pop("_conexao", None)
+    falhou = g.pop("_falhou", False)
     if con is None:
         return  # a requisição não usou o banco (ex.: arquivos do front)
     try:
-        if excecao is None:
+        if excecao is None and not falhou:
             con.commit()
         else:
             con.rollback()
@@ -79,7 +96,9 @@ def fechar(excecao=None):
 
 
 def registrar(app):
-    """Liga o fechar() ao Flask. Chamado UMA vez, no criar_app() do app.py."""
-    # teardown_appcontext: o Flask chama a função ao desmontar o contexto da requisição,
-    # passando a exceção que aconteceu (ou None se deu tudo certo).
+    """Liga o banco ao Flask. Chamado UMA vez, no criar_app() do app.py."""
+    # after_request: roda com a resposta pronta -> anota se foi erro.
+    app.after_request(marcar_falha)
+    # teardown_appcontext: roda SEMPRE ao fim da requisição, recebendo a exceção que
+    # aconteceu (ou None) -> decide COMMIT ou ROLLBACK e fecha a conexão.
     app.teardown_appcontext(fechar)
