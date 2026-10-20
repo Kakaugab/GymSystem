@@ -279,6 +279,7 @@ def inserir_dados(cur):
 
 CONTAGEM = """
 SELECT 'usuarios' AS tabela, COUNT(*) AS linhas FROM usuarios UNION ALL
+SELECT 'sessoes', COUNT(*) FROM sessoes UNION ALL
 SELECT 'categorias_ranking', COUNT(*) FROM categorias_ranking UNION ALL
 SELECT 'perfis', COUNT(*) FROM perfis UNION ALL
 SELECT 'opcoes_configuracao', COUNT(*) FROM opcoes_configuracao UNION ALL

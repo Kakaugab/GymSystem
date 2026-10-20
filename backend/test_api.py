@@ -6,6 +6,7 @@ Os testes rodam SEMPRE no banco de TESTE (DB_NAME_TESTE do .env, padrão "gymsys
 nunca no banco principal. No início de cada execução o banco de teste é APAGADO e recriado
 pelo seed, então os testes sempre começam dos mesmos dados.
 """
+import hashlib
 import os
 import unittest
 from pathlib import Path
@@ -21,8 +22,9 @@ if not BANCO_TESTE.endswith("_test"):
 os.environ["DB_NAME"] = BANCO_TESTE
 
 import app as modulo_app  # noqa: E402
+import gamificacao as gm  # noqa: E402
 import repositorio as repo  # noqa: E402
-from db import seed  # noqa: E402
+from db import conexao, seed  # noqa: E402
 
 
 def setUpModule():
@@ -94,6 +96,13 @@ class TesteAPI(unittest.TestCase):
         lista = self.c.get("/api/ranking?categoria=Evoluídos", headers=h).json
         self.assertEqual(sum(1 for x in lista if x["eu"]), 1)
         self.assertEqual(self.c.get("/api/ranking?categoria=xyz", headers=h).status_code, 400)
+        # xp do ranking = XP total (nivel * 3000 + xp do nível), em ordem decrescente
+        xps = [x["xp"] for x in lista]
+        self.assertEqual(xps, sorted(xps, reverse=True))
+        r = self.c.get("/api/aluno/resumo", headers=h).json
+        eu = next(x for x in lista if x["eu"])
+        self.assertEqual(eu["xp"], r["nivel"] * 3000 + r["xp"])
+        self.assertEqual(eu["posicao"], r["posicao_ranking"])  # tela inicial e ranking concordam
 
     def test_desafio_e_config(self):
         h = self.entrar()
@@ -153,6 +162,50 @@ class TesteAPI(unittest.TestCase):
             self.assertIn("Carlos Oliveira", nomes())
         finally:
             self.c.patch("/api/admin/membros/4", headers=adm, json={"ativo": False})
+
+    def test_xp_por_nivel_igual(self):
+        """O repositório repete a constante do gamificacao.py (importar daria importação circular)."""
+        self.assertEqual(repo.XP_POR_NIVEL, gm.XP_POR_NIVEL)
+
+    # ---------------- sessões no banco
+    def _sessoes_com_hash(self, token):
+        """Quantas linhas da tabela sessoes têm o hash deste token (consulta direta no banco)."""
+        with self.app.app_context():
+            with conexao.obter().cursor() as cur:
+                cur.execute("SELECT COUNT(*) AS n FROM sessoes WHERE token_hash = %s",
+                            (hashlib.sha256(token.encode()).hexdigest(),))
+                return cur.fetchone()["n"]
+
+    def test_sessao_sobrevive_a_novo_app(self):
+        """O mesmo token continua válido numa instância NOVA do app (como depois de reiniciar o servidor)."""
+        h = self.entrar()
+        token = h["Authorization"].removeprefix("Bearer ")
+        novo = modulo_app.criar_app().test_client()
+        r = novo.get("/api/eu", headers=h)
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.json["nome"], "Lucas Oliveira")
+        # No banco fica só o hash: o token em si não aparece em nenhuma linha.
+        self.assertEqual(self._sessoes_com_hash(token), 1)
+        with self.app.app_context():
+            with conexao.obter().cursor() as cur:
+                cur.execute("SELECT COUNT(*) AS n FROM sessoes WHERE token_hash = %s", (token,))
+                self.assertEqual(cur.fetchone()["n"], 0)
+
+    def test_logout_apaga_sessao_do_banco(self):
+        """Depois do logout, o token não vale nem numa instância nova do app, e a linha some do banco."""
+        h = self.entrar()
+        token = h["Authorization"].removeprefix("Bearer ")
+        self.assertEqual(self.c.post("/api/logout", headers=h).status_code, 200)
+        novo = modulo_app.criar_app().test_client()
+        self.assertEqual(novo.get("/api/eu", headers=h).status_code, 401)
+        self.assertEqual(self._sessoes_com_hash(token), 0)
+
+    def test_sessao_vencida(self):
+        """Uma sessão com prazo vencido é recusada (401)."""
+        token = "token-de-teste-vencido"
+        with self.app.app_context():  # ao sair do contexto, o conexao.py faz o COMMIT
+            repo.criar_sessao(token, 1, -60)  # venceu há 1 minuto
+        self.assertEqual(self.c.get("/api/eu", headers={"Authorization": "Bearer " + token}).status_code, 401)
 
     def test_dados_persistem_em_novo_app(self):
         """Um treino concluído continua lá numa instância NOVA do app (os dados estão no banco, não na memória)."""

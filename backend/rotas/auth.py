@@ -1,6 +1,8 @@
-"""Login, logout e o controle de acesso (quem pode chamar cada rota)."""
+"""Login, logout e o controle de acesso (quem pode chamar cada rota).
+
+As sessões ficam no banco (tabela sessoes, só o hash do token): reiniciar o servidor não desloga ninguém.
+"""
 import secrets
-import time
 from functools import wraps
 
 from flask import Blueprint, g, jsonify, request
@@ -11,7 +13,6 @@ import repositorio as repo
 bp = Blueprint("auth", __name__)
 
 DURACAO_SESSAO = 12 * 60 * 60  # 12 horas
-SESSOES = {}  # token -> {usuario_id, papel, expira}
 
 
 def erro(mensagem, status):
@@ -30,9 +31,8 @@ def exige_login(papel=None):
         @wraps(func)
         def envolvida(*args, **kwargs):
             token = request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
-            sessao = SESSOES.get(token)
-            if not sessao or sessao["expira"] < time.time():
-                SESSOES.pop(token, None)
+            sessao = repo.buscar_sessao(token) if token else None  # None = não existe ou venceu
+            if not sessao:
                 return erro("Sessão expirada. Faça login novamente.", 401)
             if papel and sessao["papel"] != papel:
                 return erro("Você não tem permissão para acessar isso.", 403)
@@ -54,9 +54,8 @@ def login():
     usuario = repo.buscar_usuario_por_email(email)
     if not usuario or not check_password_hash(usuario["senha_hash"], senha):
         return erro("E-mail ou senha incorretos.", 401)
-    token = secrets.token_urlsafe(32)
-    SESSOES[token] = {"usuario_id": usuario["id"], "papel": usuario["papel"],
-                      "expira": time.time() + DURACAO_SESSAO}
+    token = secrets.token_urlsafe(32)  # 32 bytes aleatórios = 256 bits
+    repo.criar_sessao(token, usuario["id"], DURACAO_SESSAO)
     return jsonify({"token": token,
                     "usuario": {"id": usuario["id"], "nome": usuario["nome"], "papel": usuario["papel"]}})
 
@@ -64,7 +63,7 @@ def login():
 @bp.post("/logout")
 @exige_login()
 def logout():
-    SESSOES.pop(g.token, None)
+    repo.apagar_sessao(g.token)
     return jsonify({"ok": True})
 
 

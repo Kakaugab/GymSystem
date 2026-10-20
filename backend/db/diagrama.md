@@ -22,6 +22,7 @@ e cada treino do histórico pertence a **exatamente um** usuário.
 ```mermaid
 erDiagram
     %% ---------------- pessoas e gamificação
+    usuarios ||--o{ sessoes : "está logado em"
     usuarios ||--o| perfis : "tem perfil de jogo"
     categorias_ranking ||--o{ perfis : "agrupa no ranking"
     usuarios ||--o{ configuracoes_usuario : "personaliza"
@@ -58,6 +59,12 @@ erDiagram
         enum papel "aluno | admin"
         char cpf UK "NULL para admin"
         date criado_em
+    }
+    sessoes {
+        char token_hash PK "SHA-256 do token, nunca o token"
+        int usuario_id FK
+        datetime criada_em
+        datetime expira_em
     }
     perfis {
         int usuario_id PK, FK
@@ -226,5 +233,8 @@ O progresso de cada medalha é calculado no `gamificacao.py` a partir dos númer
    antigo não existe por completo.
 7. **CPF em `usuarios`.** O CPF é da pessoa. Se ficasse em `matriculas`, ele se repetiria a cada
    renovação de contrato.
-8. **ON DELETE.** Dados "da pessoa" (perfil, histórico, recordes) usam `CASCADE`. Dados financeiros
+8. **Sessões com hash.** `sessoes` guarda o SHA-256 do token de login, nunca o token. Assim,
+   uma cópia vazada da tabela não permite entrar no sistema. Como as sessões ficam no banco,
+   reiniciar o servidor não desloga ninguém, e o logout apaga a linha.
+9. **ON DELETE.** Dados "da pessoa" (perfil, histórico, recordes) usam `CASCADE`. Dados financeiros
    (`matriculas`, `pagamentos`) usam `RESTRICT`: o banco impede apagar um aluno que tenha contrato.

@@ -20,6 +20,7 @@ PASTA_FRONT = Path(__file__).resolve().parent.parent / "frontend"
 def criar_app():
     app = Flask(__name__, static_folder=None)
     app.json.ensure_ascii = False  # acentos aparecem normalmente no JSON
+    app.json.sort_keys = False     # mantém a ordem das chaves como veio do banco (ex.: configurações)
     conexao.registrar(app)  # banco: 1 conexão por requisição, COMMIT no fim (ROLLBACK se der erro)
 
     for bp in (auth.bp, aluno.bp, admin.bp):

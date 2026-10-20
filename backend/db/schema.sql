@@ -26,6 +26,7 @@
 -- =====================================================================
 
 SET FOREIGN_KEY_CHECKS = 0;
+DROP TABLE IF EXISTS sessoes;
 DROP TABLE IF EXISTS pagamentos;
 DROP TABLE IF EXISTS matriculas;
 DROP TABLE IF EXISTS planos;
@@ -66,6 +67,22 @@ CREATE TABLE usuarios (
     PRIMARY KEY (id),
     UNIQUE KEY uq_usuarios_email (email),
     UNIQUE KEY uq_usuarios_cpf (cpf)                -- UNIQUE aceita vários NULL
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
+
+-- Sessões de login (o "token" que o front manda em Authorization: Bearer ...).
+-- Guardamos só o HASH SHA-256 do token, nunca o token: se alguém copiar esta tabela,
+-- não consegue usar as sessões. O SHA-256 (rápido, sem salt) basta aqui porque o token é
+-- aleatório e longo (256 bits), impossível de adivinhar, ao contrário de uma senha. E, sem
+-- salt, o mesmo token sempre gera o mesmo hash, o que permite achar a sessão pela PK.
+CREATE TABLE sessoes (
+    token_hash  CHAR(64) NOT NULL,                  -- SHA-256 em hexadecimal (64 caracteres)
+    usuario_id  INT      NOT NULL,
+    criada_em   DATETIME NOT NULL,
+    expira_em   DATETIME NOT NULL,
+    PRIMARY KEY (token_hash),
+    KEY ix_sessoes_usuario (usuario_id),
+    KEY ix_sessoes_expira (expira_em),             -- acelera a limpeza das sessões vencidas
+    CONSTRAINT fk_sessoes_usuario FOREIGN KEY (usuario_id) REFERENCES usuarios (id) ON DELETE CASCADE
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
 
 

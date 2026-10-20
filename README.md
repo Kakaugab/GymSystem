@@ -8,7 +8,8 @@ administrativo para a academia.
 - **Banco de dados:** MySQL 8 (também roda no MariaDB do XAMPP)
 
 Os dados ficam **no banco**: concluir um treino, mudar uma configuração ou desativar um aluno
-continua valendo depois de reiniciar o servidor.
+continua valendo depois de reiniciar o servidor. O login também fica no banco, então reiniciar
+não desloga ninguém.
 
 ---
 
@@ -180,7 +181,8 @@ cd gymsystem\backend
 python -m unittest -v
 ```
 
-- São **13 testes**: os 10 originais da API e mais 3 do banco (transação, ranking e persistência).
+- São **17 testes**: os 10 originais da API e mais 7 do banco (transação, ranking, persistência
+  e sessões: token válido após reiniciar, logout, sessão vencida).
 - Rodam **sempre no banco `gymsystem_test`** (variável `DB_NAME_TESTE` do `.env`), que é **apagado
   e recriado** pelo seed no início de cada execução. O banco `gymsystem` nunca é tocado.
 - Trava de segurança: se o nome do banco de teste não terminar em `_test`, os testes se recusam a rodar.
@@ -225,7 +227,7 @@ O diagrama completo, com PKs, FKs e cardinalidades, está em
 
 | Área | Tabelas |
 |---|---|
-| Pessoas e acesso | `usuarios` (alunos e admins, com CPF) |
+| Pessoas e acesso | `usuarios` (alunos e admins, com CPF), `sessoes` (logins ativos) |
 | Gamificação | `perfis` (1:1 com usuário), `categorias_ranking`, `opcoes_configuracao`, `configuracoes_usuario` |
 | Treinos | `treinos`, `exercicios`, `treino_exercicios` (N:N), `historico_treinos`, `recordes` |
 | Conquistas | `titulos`, `usuario_titulos` (N:N), `medalhas` |
@@ -248,6 +250,10 @@ O diagrama completo, com PKs, FKs e cardinalidades, está em
 
 - **Senhas:** só o hash (`werkzeug.security.generate_password_hash`, algoritmo scrypt). A senha em
   texto puro nunca chega ao banco.
+- **Sessões de login:** a tabela `sessoes` guarda só o **hash SHA-256** do token, nunca o token.
+  Uma cópia vazada da tabela não serve para entrar no sistema. O SHA-256 (rápido e sem salt) é
+  suficiente aqui porque o token é aleatório e longo (256 bits), ao contrário de uma senha. O
+  logout apaga a linha, e as sessões vencidas (12 horas) são apagadas a cada novo login.
 - **SQL Injection:** todas as consultas são **parametrizadas** (`%s`). Nenhum valor é colado no SQL
   com f-string.
 - **Credenciais** ficam no `.env`, fora do Git. O app usa o usuário `gym`, que só enxerga os dois bancos.
@@ -310,7 +316,7 @@ Em caso de erro a resposta é `{"erro": "mensagem"}` com o status HTTP correspon
 | POST | `/treinos/concluir` | `{treino:"A", segundos:2700, cargas:[40,30,14,20,25]}` | Salva o treino, calcula XP/nível/sequência/recordes |
 | PUT | `/aluno/config` | `{chave:"sons_app", valor:false}` | Liga/desliga uma configuração |
 | GET | `/aluno/conquistas` | — | Títulos e medalhas com progresso |
-| GET | `/ranking` | `?categoria=Evoluídos` (ou Moderados, Iniciantes) | Lista ordenada por nível e XP (só matrículas ativas) |
+| GET | `/ranking` | `?categoria=Evoluídos` (ou Moderados, Iniciantes) | Lista ordenada por XP total (só matrículas ativas) |
 | GET | `/duelos` | — | Duelo ativo e convites |
 | POST | `/duelos/convites/<id>` | `{aceitar:true}` | Aceita ou recusa um convite |
 | GET | `/desafios` | — | Desafio ativo (com progresso) e desafios da academia |
@@ -339,6 +345,7 @@ Ficam em `gamificacao.py`:
 - Títulos por nível: 1–5 Iniciante, 6–10 Moderado, 11–15 Intermediário, 16–20 Avançado, 21+ Evoluído.
 - Sequência: treinou ontem e treinou hoje → +1 dia; ficou um dia sem treinar → volta para 1.
 - Próximo treino segue o rodízio A → B → C.
+- Ranking: ordenado pelo **XP total** = nível × 3.000 + XP dentro do nível.
 - Progresso no desafio da semana = treinos concluídos nos **últimos 7 dias** (até a meta de 5).
 
 ---
@@ -383,16 +390,18 @@ Ficam em `gamificacao.py`:
    - *Opcional:* conclua o Treino B (+130 XP, sem bônus de sequência, porque já treinou hoje) para
      ver a barra chegar a **5/5**.
    - *Opcional:* em Duelos, o XP do Lucas contra a Maria Silva também subiu (1.850 → 2.120).
-5. **Ranking (Evoluídos):** Lucas em **#4**. Ordem por nível e, no mesmo nível, por XP. O Lucas é
-   nível 12, então a Camila (nível 13) continua à frente mesmo com menos XP no nível.
+5. **Ranking (Evoluídos):** Lucas em **#4**, com **38.720 XP** no total (era 38.450 antes do treino).
 6. **Painel admin:** Perfil → **Sair da conta** → **Acesso da academia**.
    - Painel: **22 / 23** alunos ativos, receita do mês e inadimplência calculadas dos pagamentos.
    - Membros → **Camila Rocha** → **Desativar Aluno**. O painel passa a mostrar **21 / 23**, e o
      Financeiro mostra +1 cancelamento.
 7. **Fechando o ciclo:** saia, entre de novo como Lucas e abra o Ranking. A Camila **sumiu** (matrícula
    inativa) e o Lucas subiu para **#3**.
-8. *Opcional (persistência):* pare o servidor (Ctrl+C), suba de novo e faça login. O XP, o histórico
-   e a Camila desativada continuam lá. Só é preciso logar de novo (veja as limitações).
+8. *Opcional (persistência):* com o Lucas logado no navegador, pare o servidor (Ctrl+C) e suba
+   de novo. **Sem recarregar a página**, clique em outra aba: o app continua logado (a sessão está
+   no banco) e o XP, o histórico e o ranking sem a Camila continuam lá. Não aperte F5: o front
+   guarda o token só na memória da página, então recarregar volta para a tela de login, mesmo
+   com a sessão ainda válida no banco.
 
 **Depois da apresentação:** `python db\seed.py -y` volta tudo ao estado inicial.
 
@@ -405,16 +414,14 @@ Ficam em `gamificacao.py`:
 2. **Aluno sem matrícula não aparece no painel.** Para o sistema, "membro" = aluno + matrícula.
 3. **Não existe rota para cadastrar aluno** (nem matrícula ou pagamento). Esses dados entram pelo seed.
    Os botões "Criar conta" e "Esqueci minha senha" do app ainda não fazem nada.
-4. **Sessões de login ficam em memória.** Reiniciar o servidor desloga todo mundo (os dados continuam
-   no banco). Está planejado guardar as sessões no banco (tabela `sessoes` com o hash SHA-256 do token).
-5. **Títulos não são liberados automaticamente.** Só existem os que o seed liberou. Medalhas, ao
+4. **Títulos não são liberados automaticamente.** Só existem os que o seed liberou. Medalhas, ao
    contrário, têm o progresso calculado na hora.
-6. **O progresso do desafio conta os últimos 7 dias**, e não o período do desafio (regra do
+5. **O progresso do desafio conta os últimos 7 dias**, e não o período do desafio (regra do
    `gamificacao.py`). A recompensa de XP ao fim do desafio ainda não é entregue.
-7. **O gráfico de evolução mostra o recorde, que só sobe**, e não a carga de cada treino: a API não
+6. **O gráfico de evolução mostra o recorde, que só sobe**, e não a carga de cada treino: a API não
    grava a carga de cada exercício por treino, só os recordes.
-8. **A meta de frequência mensal é fixa (10 dias)** e a frequência do painel ("3x/sem") é a média dos
+7. **A meta de frequência mensal é fixa (10 dias)** e a frequência do painel ("3x/sem") é a média dos
    últimos 28 dias.
-9. **Os dados do seed são relativos ao dia em que ele roda** (veja o roteiro acima).
-10. **Uma conexão por requisição, sem pool.** É suficiente para o trabalho; com muitos usuários
+8. **Os dados do seed são relativos ao dia em que ele roda** (veja o roteiro acima).
+9. **Uma conexão por requisição, sem pool.** É suficiente para o trabalho; com muitos usuários
     simultâneos valeria usar um pool de conexões.

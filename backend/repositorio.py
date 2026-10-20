@@ -19,13 +19,18 @@ Regras seguidas em todo o arquivo:
       TINYINT -> bool
   * "Hoje" vem do Python (date.today()), igual ao gamificacao.py, para os dois concordarem.
 """
+import hashlib
 from collections import defaultdict
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 
 from db import conexao
 
 MESES = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"]
+
+# Mesmo valor de gamificacao.XP_POR_NIVEL (o teste test_xp_por_nivel_igual confere).
+# Não importamos de lá porque o gamificacao.py já importa este arquivo (importação circular).
+XP_POR_NIVEL = 3000
 
 # Subconsulta usada no ranking e no painel: o id da matrícula ATUAL (a mais recente) do aluno "u".
 # É um texto fixo, sem nenhum valor vindo de fora, por isso pode ser emendado em outras consultas.
@@ -81,6 +86,33 @@ def buscar_usuario_por_email(email):
 def buscar_usuario_por_id(usuario_id):
     """-> mesmo formato de buscar_usuario_por_email, ou None"""
     return _um("SELECT id, nome, email, senha_hash, papel FROM usuarios WHERE id = %s", (usuario_id,))
+
+
+# =========================================================== SESSÕES (login)
+def _hash_token(token):
+    """SHA-256 do token em hexadecimal (64 caracteres). É isso que vai para o banco, nunca o token."""
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def criar_sessao(token, usuario_id, duracao_segundos):
+    """Registra o login: guarda o hash do token, válido por duracao_segundos."""
+    agora = datetime.now()
+    # Aproveita o login para apagar as sessões que já venceram (a tabela não cresce para sempre).
+    _executar("DELETE FROM sessoes WHERE expira_em < %s", (agora,))
+    _executar("INSERT INTO sessoes (token_hash, usuario_id, criada_em, expira_em) VALUES (%s, %s, %s, %s)",
+              (_hash_token(token), usuario_id, agora, agora + timedelta(seconds=duracao_segundos)))
+
+
+def buscar_sessao(token):
+    """-> {usuario_id, papel} se o token existe e não venceu, senão None"""
+    # O papel vem da tabela usuarios (JOIN): se o papel do usuário mudar, vale na hora.
+    return _um("SELECT s.usuario_id, u.papel FROM sessoes s JOIN usuarios u ON u.id = s.usuario_id "
+               "WHERE s.token_hash = %s AND s.expira_em > %s", (_hash_token(token), datetime.now()))
+
+
+def apagar_sessao(token):
+    """Logout: apaga a sessão (o token deixa de valer, mesmo antes de vencer)."""
+    _executar("DELETE FROM sessoes WHERE token_hash = %s", (_hash_token(token),))
 
 
 # =========================================================== TREINOS
@@ -264,13 +296,14 @@ def listar_ranking(categoria):
     if not _um("SELECT nome FROM categorias_ranking WHERE nome = %s", (categoria,)):
         return None
     # Só entram alunos cuja matrícula ATUAL está ativa (aluno desativado some do ranking).
-    # Ordem: nível maior primeiro e, no mesmo nível, mais XP (o XP zera a cada nível,
-    # então ordenar só pelo XP colocaria um nível 18 com 100 XP atrás de um nível 2 com 900).
-    return _todos("SELECT p.usuario_id, u.nome, p.xp, p.emoji FROM perfis p "
+    # O "xp" do ranking é o XP TOTAL (nivel * 3000 + xp do nível): o perfil guarda só o XP
+    # dentro do nível (que zera a cada nível), e comparar esse número entre pessoas de níveis
+    # diferentes não faz sentido. Ordenar pelo total dá o mesmo resultado que nivel, xp.
+    return _todos("SELECT p.usuario_id, u.nome, p.nivel * %s + p.xp AS xp, p.emoji FROM perfis p "
                   "JOIN usuarios u ON u.id = p.usuario_id "
                   "JOIN matriculas m ON m.id = (" + SQL_MATRICULA_ATUAL + ") AND m.ativo = TRUE "
                   "WHERE p.categoria_ranking = %s "
-                  "ORDER BY p.nivel DESC, p.xp DESC, u.nome", (categoria,))
+                  "ORDER BY xp DESC, u.nome", (XP_POR_NIVEL, categoria))
 
 
 # =========================================================== DUELOS
