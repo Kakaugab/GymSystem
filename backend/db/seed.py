@@ -114,6 +114,9 @@ ALUNOS = [
     (23, "Jessica Souza", _, _, "Iniciantes", 1, 150, 1, 1, 1, 3, _, 3, "Trimestral", 83.00, 5, True),
 ]
 
+# O desafio da semana termina este número de dias depois do seed.
+DURACAO_DESAFIO = 7
+
 # Dias (atrás) em que o Lucas treinou: 12 treinos em 28 dias = "3x/sem" no painel.
 # Nenhum treino entre 4 e 6 dias atrás: a janela "últimos 7 dias" do desafio só pega os dias 1, 2 e 3.
 DIAS_TREINO_LUCAS = [1, 2, 3, 7, 9, 11, 13, 16, 19, 22, 25, 27]
@@ -265,12 +268,13 @@ def inserir_dados(cur):
     cur.execute("INSERT INTO duelos (id, desafiante_id, desafiado_id, objetivo, dias, status, criado_em) "
                 "VALUES (7, 20, 1, %s, 5, 'pendente', %s)", ("Foco em Pernas", dia(-1)))
 
-    # --- desafio da semana: 12 participantes (o Lucas ainda não entrou)
+    # --- desafio da semana: começa no dia do seed e dura 7 dias (folga para a apresentação).
+    #     12 participantes; o Lucas ainda não entrou.
     cur.execute("INSERT INTO desafios (id, nome, meta, recompensa_xp, treinos_meta, inicio, termina_em) "
                 "VALUES (1, %s, %s, 500, 5, %s, %s)",
-                ("Desafio Semanal de Cardio", "Maior ganho de XP em 7 dias", dia(-5), dia(2)))
+                ("Desafio Semanal de Cardio", "Maior ganho de XP em 7 dias", dia(0), dia(DURACAO_DESAFIO)))
     cur.executemany("INSERT INTO participacoes (desafio_id, usuario_id, entrou_em) VALUES (1, %s, %s)",
-                    [(uid, dia(-4)) for uid in (2, 3, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14)])
+                    [(uid, dia(0)) for uid in (2, 3, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14)])
 
 
 CONTAGEM = """
